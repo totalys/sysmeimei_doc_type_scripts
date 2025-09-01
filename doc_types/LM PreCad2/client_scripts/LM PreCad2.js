@@ -818,8 +818,7 @@ frappe.ui.form.on('LM PreCad2', {
     
     // CPF (sistema PreCad2)
     cpf: function(frm) {
-        if (frm._cpf_processing || frm._creating_documents) return;
-        frm.trigger('processar_cpf');
+        // ...evento mantido vazio para evitar múltiplas validações...
     },
     
     // Celular (sistema PreCad2)
@@ -1259,39 +1258,64 @@ frappe.ui.form.on('LM PreCad2', {
     },
 
     configurar_validacao_campos: function(frm) {
-        // Validação do CPF
+        // Validação e formatação simplificada do CPF
         if (frm.fields_dict['cpf'] && frm.fields_dict['cpf'].$input) {
             var cpfInput = frm.fields_dict['cpf'].$input;
-            
-            cpfInput.off('input.cpf_validation keypress.cpf_validation');
-            
+            cpfInput.off('input.cpf_validation keypress.cpf_validation blur.cpf_validation');
+
+            // Permitir apenas números
             cpfInput.on('keypress.cpf_validation', function(e) {
                 var char = String.fromCharCode(e.which);
                 var isNumeric = /[0-9]/.test(char);
                 var isControlKey = e.which === 8 || e.which === 9 || e.which === 46 || e.which === 37 || e.which === 39;
-                
                 if (!isNumeric && !isControlKey) {
                     e.preventDefault();
-                    frappe.show_alert({
-                        message: '⚠️ Apenas números são permitidos no CPF',
-                        indicator: 'orange'
-                    }, 2);
+                    frappe.show_alert({ message: '⚠️ Apenas números são permitidos no CPF', indicator: 'orange' }, 2);
                     return false;
                 }
             });
-            
+
+            // Ao digitar, limpa e formata se completo
             cpfInput.on('input.cpf_validation', function(e) {
-                var value = e.target.value;
-                var cleanValue = value.replace(/\D/g, '');
-                
-                if (value !== cleanValue) {
-                    e.target.value = cleanValue;
-                }
-                
-                if (cleanValue.length > SYSTEM_CONFIG.MAX_CPF_LENGTH) {
-                    e.target.value = cleanValue.substring(0, SYSTEM_CONFIG.MAX_CPF_LENGTH);
+                var value = e.target.value.replace(/\D/g, '');
+                if (value.length > 11) value = value.substring(0, 11);
+                // Formata para leitura se completo
+                if (value.length === 11) {
+                    var formatted = value.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+                    cpfInput.val(formatted);
+                    frm.doc.cpf = formatted;
+                    // Valida e mostra mensagem
+                    if (isValidCPF(value)) {
+                        frm.set_value('cpf_ok', 1);
+                        frm.set_value('cpf_nok', 0);
+                        frappe.show_alert({ message: '✅ CPF válido!', indicator: 'green' }, 2);
+                    } else {
+                        frm.set_value('cpf_ok', 0);
+                        frm.set_value('cpf_nok', 1);
+                        frappe.show_alert({ message: '❌ CPF inválido', indicator: 'red' }, 3);
+                    }
+                } else {
+                    cpfInput.val(value);
+                    frm.doc.cpf = value;
+                    frm.set_value('cpf_ok', 0);
+                    frm.set_value('cpf_nok', 0);
                 }
             });
+        }
+        // Função de validação de CPF (algoritmo oficial)
+        function isValidCPF(cpf) {
+            if (!cpf || cpf.length !== 11 || /^([0-9])\1+$/.test(cpf)) return false;
+            var sum = 0, rest;
+            for (var i = 1; i <= 9; i++) sum += parseInt(cpf.substring(i-1, i)) * (11 - i);
+            rest = (sum * 10) % 11;
+            if (rest === 10 || rest === 11) rest = 0;
+            if (rest !== parseInt(cpf.substring(9, 10))) return false;
+            sum = 0;
+            for (i = 1; i <= 10; i++) sum += parseInt(cpf.substring(i-1, i)) * (12 - i);
+            rest = (sum * 10) % 11;
+            if (rest === 10 || rest === 11) rest = 0;
+            if (rest !== parseInt(cpf.substring(10, 11))) return false;
+            return true;
         }
     },
 
@@ -1317,131 +1341,7 @@ frappe.ui.form.on('LM PreCad2', {
     //========================================
     
     processar_cpf: function(frm) {
-        if (frm._cpf_processing) return;
-        if (frm.cpf_timeout) clearTimeout(frm.cpf_timeout);
-        
-        frm.cpf_timeout = setTimeout(function() {
-            try {
-                frm._cpf_processing = true;
-                
-                frm.set_value('cpf_ok', 0);
-                frm.set_value('cpf_nok', 0);
-                
-                if (!frm.doc.cpf) {
-                    frm.trigger('update_all_descriptions');
-                    frm._cpf_processing = false;
-                    return;
-                }
-                
-                var valorOriginal = frm.doc.cpf;
-                var cpfLimpo = valorOriginal.replace(/\D/g, '');
-                
-                if (cpfLimpo.length === 0) {
-                    frm.set_value('cpf', '');
-                    frm._cpf_processing = false;
-                    return;
-                }
-                
-                if (cpfLimpo.length > 11) {
-                    var cpfTruncado = cpfLimpo.substring(0, 11);
-                    frm.set_value('cpf', cpfTruncado);
-                    frm._cpf_processing = false;
-                    return;
-                }
-                
-                // Formatação do CPF
-                var cpfFormatado = cpfLimpo;
-                if (cpfLimpo.length === 11) {
-                    cpfFormatado = cpfLimpo.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-                } else if (cpfLimpo.length >= 7) {
-                    cpfFormatado = cpfLimpo.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
-                } else if (cpfLimpo.length >= 4) {
-                    cpfFormatado = cpfLimpo.replace(/(\d{3})(\d{1,3})/, '$1.$2');
-                }
-                
-                if (valorOriginal !== cpfFormatado && cpfLimpo.length >= 3) {
-                    frm.set_value('cpf', cpfFormatado);
-                    frm._cpf_processing = false;
-                    return;
-                }
-                
-                // Validação para CPF completo
-                if (cpfLimpo.length === 11) {
-                    if (/^(\d)\1{10}$/.test(cpfLimpo)) {
-                        frm.set_value('cpf_nok', 1);
-                        frappe.show_alert({ message: '❌ CPF inválido', indicator: 'red' }, 3);
-                        frm.trigger('update_all_descriptions');
-                        frm._cpf_processing = false;
-                        return;
-                    }
-                    
-                    // Validação dos dígitos verificadores
-                    var soma1 = 0;
-                    for (var i = 0; i < 9; i++) {
-                        soma1 += parseInt(cpfLimpo.charAt(i)) * (10 - i);
-                    }
-                    var dv1 = (soma1 % 11) < 2 ? 0 : 11 - (soma1 % 11);
-                    
-                    if (dv1 !== parseInt(cpfLimpo.charAt(9))) {
-                        frm.set_value('cpf_nok', 1);
-                        frappe.show_alert({ message: '❌ CPF inválido', indicator: 'red' }, 3);
-                        frm.trigger('update_all_descriptions');
-                        frm._cpf_processing = false;
-                        return;
-                    }
-                    
-                    var soma2 = 0;
-                    for (var i = 0; i < 10; i++) {
-                        soma2 += parseInt(cpfLimpo.charAt(i)) * (11 - i);
-                    }
-                    var dv2 = (soma2 % 11) < 2 ? 0 : 11 - (soma2 % 11);
-                    
-                    if (dv2 !== parseInt(cpfLimpo.charAt(10))) {
-                        frm.set_value('cpf_nok', 1);
-                        frappe.show_alert({ message: '❌ CPF inválido', indicator: 'red' }, 3);
-                        frm.trigger('update_all_descriptions');
-                        frm._cpf_processing = false;
-                        return;
-                    }
-                    
-                    // CPF VÁLIDO
-                    frm.set_value('cpf_ok', 1);
-                    frappe.show_alert({ message: '✅ CPF válido!', indicator: 'green' }, 2);
-                    
-                    // Atualizar email provisório automaticamente
-                    if (frm.doc.email_provisorio && !frm._updating_email_provisorio) {
-                        frm._updating_email_provisorio = true;
-                        var emailProvisorio = cpfLimpo + SYSTEM_CONFIG.EMAIL_DOMAIN;
-                        
-                        frappe.model.set_value(frm.doc.doctype, frm.doc.name, 'email_id', emailProvisorio)
-                            .then(function() {
-                                frm.refresh_field('email_id');
-                            })
-                            .catch(function(error) {
-                                console.error('❌ Erro na atualização automática:', error);
-                                frm.doc.email_id = emailProvisorio;
-                                frm.refresh_field('email_id');
-                            })
-                            .finally(function() {
-                                setTimeout(function() {
-                                    if (frm && frm._updating_email_provisorio) {
-                                        frm._updating_email_provisorio = false;
-                                    }
-                                }, 500);
-                            });
-                    }
-                }
-                
-                frm.trigger('update_all_descriptions');
-                frm._cpf_processing = false;
-                
-            } catch (error) {
-                console.error('❌ Erro no CPF:', error);
-                frm.set_value('cpf_nok', 1);
-                frm.trigger('update_all_descriptions');
-                frm._cpf_processing = false;
-            }
-        }, 200);
+    // ...CPF agora validado e formatado diretamente no input, função removida...
     },
 
     processar_celular: function(frm) {
