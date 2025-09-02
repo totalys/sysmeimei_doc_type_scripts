@@ -1413,7 +1413,9 @@ frappe.ui.form.on('LM PreCad2', {
                 return;
             }
             
-            var emailProvisorio = cpfLimpo + SYSTEM_CONFIG.EMAIL_DOMAIN;
+            var nome = (frm.doc.full_name || '').trim().split(' ')[0] || 'user';
+            var cpf5 = cpfLimpo.substring(0, 5);
+            var emailProvisorio = nome + cpf5 + SYSTEM_CONFIG.EMAIL_DOMAIN;
             
             frm.set_value('email_id', emailProvisorio);
             frm.doc.email_id = emailProvisorio;
